@@ -1,0 +1,167 @@
+{
+  "cookie_cats_retention_7": {
+    "experiment_name": "Cookie Cats Day 7 Retention",
+    "metric_analyzed": "retention_7",
+    "metric_type": "proportion",
+    "sample_sizes": {
+      "gate_30": 44699,
+      "gate_40": 45489
+    },
+    "power_check": {
+      "status": "COMPLETED",
+      "target_power": 0.8,
+      "mde_absolute": 0.007322000432413614,
+      "mde_relative_pct": 3.84997173660106,
+      "observed_diff": -0.00818318160884296,
+      "was_effect_detectable": true,
+      "verdict": "WELL-POWERED: The observed change of 0.82% points exceeds the 80% power detection threshold (0.73% points)."
+    },
+    "core_test": {
+      "test_type": "Two-Proportion Pooled Z-Test",
+      "control_rate_or_mean": 0.19018322557551623,
+      "treatment_rate_or_mean": 0.18200004396667327,
+      "absolute_diff": -0.00818318160884296,
+      "relative_lift_pct": -4.3027883158883835,
+      "statistic": 3.1574100858819936,
+      "p_value": 0.0015917731773993442,
+      "ci_lower": -0.013263369909537494,
+      "ci_upper": -0.003102993308148426,
+      "is_significant": true
+    },
+    "sequential_safety": {
+      "status": "FIXED_HORIZON",
+      "looks_evaluated": 1,
+      "nominal_alpha": 0.05,
+      "adjusted_alpha": 0.05,
+      "verdict": "Single fixed-horizon evaluation: standard alpha=0.05 applies."
+    },
+    "cuped_adjustment": {
+      "status": "SKIPPED_NO_PRE_COVARIATE",
+      "covariate_used": null,
+      "correlation_rho": null,
+      "optimal_theta": null,
+      "variance_reduction_pct": 0.0,
+      "effective_sample_multiplier": 1.0,
+      "adjusted_lift": null,
+      "adjusted_p_value": null
+    },
+    "guardrails": {
+      "novelty_status": "SKIPPED_NO_DAY_COLUMN",
+      "novelty_flagged": null,
+      "simpsons_status": "SKIPPED_NO_SEGMENT_COLUMN",
+      "simpsons_flagged": null,
+      "details": {}
+    },
+    "executive_recommendation": "STATISTICALLY SIGNIFICANT LOSS: Treatment produced a statistically significant decline (-0.008, p = 1.5918e-03). DO NOT SHIP."
+  },
+  "cookie_cats_gamerounds": {
+    "experiment_name": "Cookie Cats Gamerounds",
+    "metric_analyzed": "sum_gamerounds",
+    "metric_type": "continuous",
+    "sample_sizes": {
+      "gate_30": 44699,
+      "gate_40": 45489
+    },
+    "power_check": {
+      "status": "COMPLETED",
+      "target_power": 0.8,
+      "mde_absolute": 1.9159309124904826,
+      "mde_relative_pct": 3.73169488267507,
+      "observed_diff": -0.04333503360787461,
+      "was_effect_detectable": false,
+      "verdict": "EFFECT SMALLER THAN MDE: The observed change of 0.043 rounds is much smaller than the 80% power detection threshold (1.916 rounds). Given the sample sizes, this experiment was powered to detect changes of ~1.92 units (~3.7%). The observed 0.043 unit difference is practically negligible."
+    },
+    "core_test": {
+      "test_type": "Welch's Two-Sample T-Test (Unequal Variances)",
+      "control_rate_or_mean": 51.342110561757536,
+      "treatment_rate_or_mean": 51.29877552814966,
+      "absolute_diff": -0.04333503360787461,
+      "relative_lift_pct": -0.08440446474390352,
+      "statistic": 0.06337426312892294,
+      "p_value": 0.949468621546446,
+      "ci_lower": -1.3835675016426394,
+      "ci_upper": 1.2968974344268902,
+      "is_significant": false
+    },
+    "sequential_safety": {
+      "status": "FIXED_HORIZON",
+      "looks_evaluated": 1,
+      "nominal_alpha": 0.05,
+      "adjusted_alpha": 0.05,
+      "verdict": "Single fixed-horizon evaluation: standard alpha=0.05 applies."
+    },
+    "cuped_adjustment": {
+      "status": "SKIPPED_NO_PRE_COVARIATE",
+      "covariate_used": null,
+      "correlation_rho": null,
+      "optimal_theta": null,
+      "variance_reduction_pct": 0.0,
+      "effective_sample_multiplier": 1.0,
+      "adjusted_lift": null,
+      "adjusted_p_value": null
+    },
+    "guardrails": {
+      "novelty_status": "SKIPPED_NO_DAY_COLUMN",
+      "novelty_flagged": null,
+      "simpsons_status": "SKIPPED_NO_SEGMENT_COLUMN",
+      "simpsons_flagged": null,
+      "details": {}
+    },
+    "executive_recommendation": "INCONCLUSIVE / NO SIGNIFICANT EFFECT: P-value (0.9495) does not meet significance threshold (alpha=0.0500)."
+  },
+  "synthetic_cuped_experiment": {
+    "experiment_name": "Synthetic Mobile Game Feature Test",
+    "metric_analyzed": "post_rounds",
+    "metric_type": "continuous",
+    "sample_sizes": {
+      "control": 2467,
+      "treatment": 2533
+    },
+    "power_check": {
+      "status": "COMPLETED",
+      "target_power": 0.8,
+      "mde_absolute": 1.574540292142847,
+      "mde_relative_pct": 3.1830386143245244,
+      "observed_diff": 1.9407960570628404,
+      "was_effect_detectable": true,
+      "verdict": "WELL-POWERED: The observed change of 1.941 units exceeds the 80% power detection threshold (1.575 units)."
+    },
+    "core_test": {
+      "test_type": "Welch's Two-Sample T-Test (Unequal Variances)",
+      "control_rate_or_mean": 49.466578415260024,
+      "treatment_rate_or_mean": 51.407374472322864,
+      "absolute_diff": 1.9407960570628404,
+      "relative_lift_pct": 3.9234491635348707,
+      "statistic": -3.4568137748849384,
+      "p_value": 0.0005511615934178039,
+      "ci_lower": 0.8401255573552899,
+      "ci_upper": 3.041466556770391,
+      "is_significant": true
+    },
+    "sequential_safety": {
+      "status": "FIXED_HORIZON",
+      "looks_evaluated": 1,
+      "nominal_alpha": 0.05,
+      "adjusted_alpha": 0.05,
+      "verdict": "Single fixed-horizon evaluation: standard alpha=0.05 applies."
+    },
+    "cuped_adjustment": {
+      "status": "APPLIED",
+      "covariate_used": "pre_rounds",
+      "correlation_rho": 0.7479145051441549,
+      "optimal_theta": 0.748199538437842,
+      "variance_reduction_pct": 55.962330004392136,
+      "effective_sample_multiplier": 2.2695092479050083,
+      "adjusted_lift": 1.5413740409916628,
+      "adjusted_p_value": 3.590722894418695e-05
+    },
+    "guardrails": {
+      "novelty_status": "SKIPPED_NO_DAY_COLUMN",
+      "novelty_flagged": null,
+      "simpsons_status": "SKIPPED_NO_SEGMENT_COLUMN",
+      "simpsons_flagged": null,
+      "details": {}
+    },
+    "executive_recommendation": "STATISTICALLY SIGNIFICANT WIN: Treatment produced a statistically significant lift (+1.541, p = 3.5907e-05)."
+  }
+}
