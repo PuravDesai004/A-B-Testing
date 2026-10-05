@@ -1,6 +1,6 @@
 """Pydantic data schemas for the experimentation analysis API."""
 
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Literal
 from pydantic import BaseModel, Field
 
 
@@ -8,7 +8,7 @@ class ExperimentAnalysisRequest(BaseModel):
     """Input payload requesting end-to-end experiment analysis."""
     dataset_name: Optional[str] = Field("cookie_cats", description="Identifier or nickname of the experiment")
     dataset_path: Optional[str] = Field(None, description="Local path to CSV dataset. If None, resolves default data path.")
-    metric_type: str = Field("proportion", description="Type of metric: 'proportion' (binary) or 'continuous'")
+    metric_type: Literal["proportion", "continuous"] = Field("proportion", description="Type of metric: 'proportion' (binary) or 'continuous'")
     metric_column: str = Field("retention_7", description="Column name of the primary outcome metric")
     variant_column: str = Field("version", description="Column name of the variant/group indicator")
     control_value: str = Field("gate_30", description="Value identifying the control group")

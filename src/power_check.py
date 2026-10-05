@@ -10,7 +10,8 @@ import sys
 from pathlib import Path
 from typing import NamedTuple, Dict, Any
 import numpy as np
-from statsmodels.stats.power import NormalIndPower, TTestIndPower
+from statsmodels.stats.power import NormalIndPower
+from scipy import stats, optimize
 
 
 class ProportionPowerResult(NamedTuple):
@@ -114,13 +115,13 @@ def compute_proportion_mde(
     if was_detectable:
         verdict = (
             f"WELL-POWERED: The observed change of {obs_abs:.2%} points exceeds the "
-            f"80% power detection threshold ({mde_abs:.2%} points)."
+            f"{power:.0%} power detection threshold ({mde_abs:.2%} points)."
         )
     else:
         verdict = (
             f"POTENTIALLY UNDERPOWERED FOR OBSERVED EFFECT: The observed change of "
             f"{obs_abs:.2%} points is smaller than the minimum effect this experiment "
-            f"could reliably catch at 80% power ({mde_abs:.2%} points). "
+            f"could reliably catch at {power:.0%} power ({mde_abs:.2%} points). "
             f"A non-significant result cannot rule out a real effect up to {mde_abs:.2%} points."
         )
 
@@ -176,24 +177,36 @@ def compute_continuous_mde(
     -------
     result : ContinuousPowerResult
     """
-    ratio = n_treatment / n_control
-    power_analysis = TTestIndPower()
+    if n_control < 2 or n_treatment < 2:
+        raise ValueError("Welch power requires at least two observations per group.")
+    if not (0 < alpha < 1 and alpha < power < 1):
+        raise ValueError("Require 0 < alpha < power < 1.")
+    if not np.isfinite([control_std, treatment_std]).all() or min(control_std, treatment_std) < 0:
+        raise ValueError("Standard deviations must be finite and nonnegative.")
+    va = control_std ** 2 / n_control
+    vb = treatment_std ** 2 / n_treatment
+    if va + vb == 0:
+        raise ValueError("Welch power requires positive standard error.")
+    se = float(np.sqrt(va + vb))
+    df = (va + vb) ** 2 / (va ** 2 / (n_control - 1) + vb ** 2 / (n_treatment - 1))
+    critical = stats.t.ppf(1 - alpha / 2, df)
 
-    # Solve for Minimum Detectable Effect in Cohen's d: d = |mu1 - mu2| / pooled_std
-    d_mde = power_analysis.solve_power(
-        effect_size=None,
-        nobs1=n_control,
-        alpha=alpha,
-        power=power,
-        ratio=ratio,
-        alternative="two-sided"
-    )
+    # Plug-in noncentral-t approximation using the same SE and degrees of
+    # freedom as Welch's test. Estimated variances are treated as fixed.
+    def achieved_power(noncentrality):
+        # Symmetry avoids loss of precision in the negative-tail CDF at
+        # small degrees of freedom and large positive noncentrality.
+        return stats.nct.sf(critical, df, noncentrality) + stats.nct.sf(critical, df, -noncentrality)
 
-    # Pooled standard deviation
-    pooled_var = (((n_control - 1) * (control_std ** 2)) + ((n_treatment - 1) * (treatment_std ** 2))) / (n_control + n_treatment - 2)
+    upper = 1.0
+    while achieved_power(upper) < power:
+        upper *= 2
+    ncp = optimize.brentq(lambda value: achieved_power(value) - power, 0, upper)
+    mde_abs_rounds = float(ncp * se)
+    # Retain descriptive standardized effect fields for backwards compatibility.
+    pooled_var = ((n_control - 1) * control_std ** 2 + (n_treatment - 1) * treatment_std ** 2) / (n_control + n_treatment - 2)
     pooled_std = float(np.sqrt(pooled_var))
-
-    mde_abs_rounds = float(d_mde * pooled_std)
+    d_mde = mde_abs_rounds / pooled_std
     mde_rel = float(mde_abs_rounds / control_mean) if control_mean > 0 else 0.0
 
     obs_abs = float(abs(treatment_mean - control_mean))
@@ -204,14 +217,14 @@ def compute_continuous_mde(
     if was_detectable:
         verdict = (
             f"WELL-POWERED: The observed change of {obs_abs:.3f} units exceeds the "
-            f"80% power detection threshold ({mde_abs_rounds:.3f} units)."
+            f"{power:.0%} power detection threshold ({mde_abs_rounds:.3f} units)."
         )
     else:
         verdict = (
             f"EFFECT SMALLER THAN MDE: The observed change of {obs_abs:.3f} rounds "
-            f"is much smaller than the 80% power detection threshold ({mde_abs_rounds:.3f} rounds). "
+            f"is smaller than the {power:.0%} power detection threshold ({mde_abs_rounds:.3f} rounds). "
             f"Given the sample sizes, this experiment was powered to detect changes of ~{mde_abs_rounds:.2f} units (~{mde_rel:.1%}). "
-            f"The observed {obs_abs:.3f} unit difference is practically negligible."
+            f"An effect below this threshold is not evidence of practical equivalence."
         )
 
     return ContinuousPowerResult(

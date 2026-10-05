@@ -80,4 +80,4 @@ def test_boundary_helpers():
     z_obf, a_obf = get_obrien_fleming_boundaries(14, alpha=0.05)
     assert len(z_obf) == 14
     assert z_obf[0] > z_obf[-1]  # Strict early, lenient late
-    assert np.isclose(z_obf[-1], 1.960, atol=1e-3)
+    assert 1.960 < z_obf[-1] < 2.3  # Accounts for all previous looks

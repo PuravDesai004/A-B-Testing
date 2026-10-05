@@ -127,14 +127,26 @@ A-B Testing Engine/
 
 ## 4. Honest Limitations & Edge Cases
 
+### Accuracy fixes and analysis population
+
+The API now retains high game-round counts and does not filter retention records based on game rounds. Historical Phase 1 figures and saved reports use their original preprocessing and have not been regenerated; current pipeline outputs may differ. The standalone Cookie Cats loader still offers its explicit outlier-filter option.
+
+Missing primary outcomes are excluded from all pipeline stages and from reported sample sizes; they are never counted as failed conversions. This is an observed-outcome analysis, so informative missingness still requires investigation. Binary outcomes must be 0 or 1, and infinite values are rejected. Requested columns must exist. CUPED requires complete finite covariates on this population and fits only the requested two variants, including when called directly.
+
+Continuous MDE now uses a plug-in noncentral-t approximation with Welch standard error and degrees of freedom. Pooled standard deviation remains a descriptive output only. An observed effect below MDE does not establish practical equivalence.
+
+Novelty detection accepts custom group labels and requires a positive significant early effect, an estimated decrease of at least 60%, and a significant one-sided early-minus-late effect contrast. It assumes independent observations across non-overlapping windows; repeated measurements of the same users need a clustered or paired model. Failure to flag decay does not establish stability, and attenuation does not establish its cause.
+
+
 Documenting boundaries and limitations is a mark of engineering maturity:
 
 1. **The Cookie Cats Pre-Experiment Constraint (CUPED)**:
    - *Limitation*: Cookie Cats only tracks players post-install; there is zero pre-experiment history.
    - *Design Choice*: We refused to fabricate an artificial split of post-treatment rounds (which introduces conditioning bias). Instead, we demonstrated CUPED on a transparent synthetic stream with verified ground truth.
-2. **O'Brien-Fleming Discrete Calibration Gap**:
-   - *Limitation*: The continuous O'Brien-Fleming boundary approximation ($z_k = z_{\alpha/2}/\sqrt{k/K}$) yielded a cumulative FPR of 7.34% across 14 daily looks instead of strictly 5.0%.
-   - *Reason*: Exact 5% alpha preservation in discrete sequential looks requires recursive numerical integration (Lan-DeMets alpha spending recursions), whereas Pocock's constant boundary calibrated empirically to 4.84%.
+2. **O'Brien-Fleming Discrete Calibration**:
+   - The previous uncalibrated approximation produced about 7.3% false positives at a 5% target. The implementation now recursively integrates the surviving Brownian density and solves for a common boundary constant across all planned looks.
+   - `get_obrien_fleming_boundaries` accepts increasing information fractions for irregular looks; the simulation evaluator derives these from cumulative enrollment days. Calibration assumes the canonical joint-normal model and independent increments. This is a discrete O'Brien-Fleming design, not an arbitrary-monitoring guarantee.
+   - Regression tests use 50,000 independent A/A simulations for daily and irregular looks, with a 4.6%–5.4% acceptance interval around the 5% target.
 3. **Observational vs. Randomized Data in Simpson's Paradox**:
    - *Limitation*: Simpson's Paradox cannot occur in a properly randomized 50/50 A/B test because random assignment balances confounders across variants.
    - *Context*: We demonstrated Simpson's Paradox on an unstratified Cookie Cats platform rollout (`iOS` vs `Android`) to show why product teams must audit segment balances before declaring winners.
@@ -171,7 +183,7 @@ Documenting boundaries and limitations is a mark of engineering maturity:
 
 ## 6. How to Run & Verify
 
-### 1. Run Complete Automated Unit Test Suite (24 tests):
+### 1. Run Complete Automated Unit Test Suite (46 tests):
 ```powershell
 python -m pytest tests/ -v
 ```

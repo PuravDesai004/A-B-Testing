@@ -165,6 +165,11 @@ def run_cuped_analysis(
     metrics : CUPEDMetrics
         Comprehensive statistical comparison container.
     """
+    if control_label == treatment_label:
+        raise ValueError("Control and treatment labels must differ.")
+    df = df[df[variant_col].isin([control_label, treatment_label])].copy()
+    if not np.isfinite(df[[covariate_col, outcome_col]].to_numpy(dtype=float)).all():
+        raise ValueError("CUPED requires finite, nonmissing covariates and outcomes.")
     x_all = df[covariate_col].values
     y_all = df[outcome_col].values
 

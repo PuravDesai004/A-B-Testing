@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import NamedTuple, List, Tuple
 import numpy as np
 import pandas as pd
+from scipy import stats
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.continuous_test import welch_t_test, TTestResult
@@ -28,6 +29,7 @@ class NoveltyCheckResult(NamedTuple):
     decay_percentage: float             # (early_lift - late_lift) / early_lift
     has_novelty_decay: bool
     verdict: str
+    decay_p_value: float
 
 
 def generate_novelty_decay_data(
@@ -92,9 +94,14 @@ def analyze_novelty_effect(
     metric_col: str = "rounds",
     early_window: Tuple[int, int] = (1, 3),
     late_window: Tuple[int, int] = (12, 14),
-    alpha: float = 0.05
+    alpha: float = 0.05,
+    control_label: str = "control",
+    treatment_label: str = "treatment",
 ) -> NoveltyCheckResult:
-    """Analyze an experiment timeline for novelty decay using time-windowed tests.
+    """Analyze novelty decay assuming independent observations across windows.
+
+    Repeated measurements of the same users require a clustered/paired model
+    instead. The decay contrast is a one-sided early-minus-late effect test.
 
     Parameters
     ----------
@@ -116,14 +123,24 @@ def analyze_novelty_effect(
     -------
     result : NoveltyCheckResult
     """
+    if control_label == treatment_label:
+        raise ValueError("Control and treatment labels must differ.")
+    if early_window[0] > early_window[1] or late_window[0] > late_window[1] or early_window[1] >= late_window[0]:
+        raise ValueError("Early and late windows must be ordered and non-overlapping.")
+    df = df[df[variant_col].isin([control_label, treatment_label])].copy()
+    df = df.dropna(subset=[metric_col])
+    if not np.isfinite(df[[day_col, metric_col]].to_numpy(dtype=float)).all():
+        raise ValueError("Novelty checks require finite days and outcomes.")
     days = sorted(df[day_col].unique())
     daily_lifts = []
 
     # 1. Compute daily average lift across all individual days
     for d in days:
         day_sub = df[df[day_col] == d]
-        ctrl = day_sub[day_sub[variant_col] == "control"][metric_col]
-        trt = day_sub[day_sub[variant_col] == "treatment"][metric_col]
+        ctrl = day_sub[day_sub[variant_col] == control_label][metric_col]
+        trt = day_sub[day_sub[variant_col] == treatment_label][metric_col]
+        if ctrl.empty or trt.empty:
+            raise ValueError(f"Both groups need observations on day {d}.")
         lift = float(trt.mean() - ctrl.mean())
         daily_lifts.append(lift)
 
@@ -135,18 +152,18 @@ def analyze_novelty_effect(
     late_df = df[late_mask]
 
     # Run Welch's t-test on Early Window
-    early_ctrl = early_df[early_df[variant_col] == "control"][metric_col]
-    early_trt = early_df[early_df[variant_col] == "treatment"][metric_col]
+    early_ctrl = early_df[early_df[variant_col] == control_label][metric_col]
+    early_trt = early_df[early_df[variant_col] == treatment_label][metric_col]
     early_res = welch_t_test(early_ctrl, early_trt, alpha=alpha)
 
     # Run Welch's t-test on Late Window
-    late_ctrl = late_df[late_df[variant_col] == "control"][metric_col]
-    late_trt = late_df[late_df[variant_col] == "treatment"][metric_col]
+    late_ctrl = late_df[late_df[variant_col] == control_label][metric_col]
+    late_trt = late_df[late_df[variant_col] == treatment_label][metric_col]
     late_res = welch_t_test(late_ctrl, late_trt, alpha=alpha)
 
     # Run Welch's t-test on Full Timeline
-    full_ctrl = df[df[variant_col] == "control"][metric_col]
-    full_trt = df[df[variant_col] == "treatment"][metric_col]
+    full_ctrl = df[df[variant_col] == control_label][metric_col]
+    full_trt = df[df[variant_col] == treatment_label][metric_col]
     full_res = welch_t_test(full_ctrl, full_trt, alpha=alpha)
 
     # Compute Decay Rate: (early_lift - late_lift) / early_lift
@@ -158,22 +175,28 @@ def analyze_novelty_effect(
     else:
         decay_pct = 0.0
 
-    # Decision rule for Novelty Effect:
-    # 1. Early effect was statistically significant (p < 0.05).
-    # 2. Effect decayed by at least 60% by the late window OR late effect is non-significant.
-    has_decay = (early_res.p_value < alpha) and ((decay_pct >= 0.60) or (late_res.p_value >= alpha))
+    # Direct difference-in-differences test for independent observations across
+    # four cells. A change in significance alone is not evidence of decay.
+    cells = [early_ctrl, early_trt, late_ctrl, late_trt]
+    variance_terms = np.array([cell.var(ddof=1) / len(cell) for cell in cells])
+    decay_se = float(np.sqrt(variance_terms.sum()))
+    decay_df = float(variance_terms.sum() ** 2 / sum(
+        term ** 2 / (len(cell) - 1) for term, cell in zip(variance_terms, cells)))
+    decay_p = float(stats.t.sf((early_lift - late_lift) / decay_se, decay_df))
+    has_decay = bool(early_lift > 0 and early_res.p_value < alpha
+                     and decay_pct >= 0.60 and decay_p < alpha)
 
     if has_decay:
         verdict = (
             f"NOVELTY EFFECT DETECTED: Treatment lift was strongly positive in the early window "
             f"({early_lift:+.2f} rounds, p = {early_res.p_value:.4e}), but decayed by {decay_pct:.1%} "
             f"to {late_lift:+.2f} rounds (p = {late_res.p_value:.4f}) in the late window. "
-            f"The headline aggregate lift ({full_res.absolute_diff:+.2f} rounds) is artificially "
-            f"inflated by transient curiosity and will not persist in steady state."
+            f"The early-to-late decrease is significant (one-sided p = {decay_p:.4e}); "
+            f"this is evidence of attenuation, not proof of its cause or future persistence."
         )
     else:
         verdict = (
-            f"NO NOVELTY EFFECT: Treatment effect appears stable across early ({early_lift:+.2f} rounds) "
+            f"NO NOVELTY DECAY DETECTED: Insufficient evidence of a positive lift decaying by at least 60%. Early ({early_lift:+.2f} rounds) "
             f"and late ({late_lift:+.2f} rounds) windows (decay: {decay_pct:.1%})."
         )
 
@@ -188,6 +211,7 @@ def analyze_novelty_effect(
         decay_percentage=decay_pct,
         has_novelty_decay=has_decay,
         verdict=verdict,
+        decay_p_value=decay_p,
     )
 
 

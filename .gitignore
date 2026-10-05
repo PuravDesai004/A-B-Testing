@@ -11,6 +11,8 @@ htmlcov/
 # Environments
 .env
 .venv
+.test-deps/
+.test-tmp/
 env/
 venv/
 

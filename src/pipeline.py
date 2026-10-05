@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 import pandas as pd
+import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.data_loader import get_data_path
@@ -44,11 +45,30 @@ class ExperimentPipeline:
                 csv_path = get_data_path()
             df = pd.read_csv(csv_path)
 
-        # Basic hygiene: remove extreme anomalies if gamerounds column exists.
-        # The outlier (user 6390605 with 49,854 rounds) is a data quality issue
-        # that should be excluded regardless of which metric is being analyzed.
-        if "sum_gamerounds" in df.columns:
-            df = df[df["sum_gamerounds"] < 10000].copy()
+        # Use one analysis population throughout. Missing outcomes are unknown,
+        # not failures; never filter on an unrelated post-treatment metric.
+        if request.control_value == request.treatment_value:
+            raise ValueError("Control and treatment labels must differ.")
+        required = [request.variant_column, request.metric_column]
+        required += [c for c in (request.covariate_column, request.day_column,
+                                request.segment_column) if c]
+        missing = set(required) - set(df.columns)
+        if missing:
+            raise ValueError(f"Missing requested columns: {sorted(missing)}")
+        df = df[df[request.variant_column].isin(
+            [request.control_value, request.treatment_value])].copy()
+        df = df.dropna(subset=[request.metric_column])
+        values = pd.to_numeric(df[request.metric_column], errors="raise")
+        if not np.isfinite(values).all():
+            raise ValueError("Outcome values must be finite.")
+        if request.metric_type == "proportion" and not values.isin([0, 1]).all():
+            raise ValueError("Proportion outcomes must be binary (0 or 1).")
+        df[request.metric_column] = values
+        if request.covariate_column:
+            covariate = pd.to_numeric(df[request.covariate_column], errors="raise")
+            if not np.isfinite(covariate).all():
+                raise ValueError("CUPED requires finite, nonmissing covariates.")
+            df[request.covariate_column] = covariate
 
         ctrl_sub = df[df[request.variant_column] == request.control_value]
         trt_sub = df[df[request.variant_column] == request.treatment_value]
@@ -215,10 +235,13 @@ class ExperimentPipeline:
                 day_col=request.day_column,
                 variant_col=request.variant_column,
                 metric_col=metric_for_novelty,
+                control_label=request.control_value,
+                treatment_label=request.treatment_value,
                 alpha=request.alpha
             )
             novelty_flag = nov_res.has_novelty_decay
             guardrail_details["novelty_decay_pct"] = nov_res.decay_percentage * 100.0
+            guardrail_details["novelty_decay_p_value"] = nov_res.decay_p_value
             guardrail_details["novelty_verdict"] = nov_res.verdict
             guardrail_details["novelty_metric_evaluated"] = metric_for_novelty
             nov_status = "EVALUATED"

@@ -11,7 +11,8 @@ import sys
 from pathlib import Path
 from typing import NamedTuple, List, Tuple
 import numpy as np
-from scipy import stats
+from scipy import stats, optimize
+from functools import lru_cache
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.peeking_simulation import run_peeking_simulation, PeekingSimulationResult
@@ -85,37 +86,72 @@ def get_pocock_critical_value(num_looks: int, alpha: float = 0.05) -> Tuple[floa
     return float(z_crit), alpha_per_look
 
 
-def get_obrien_fleming_boundaries(num_looks: int, alpha: float = 0.05) -> Tuple[List[float], List[float]]:
-    """Compute O'Brien-Fleming critical z-values and alpha thresholds per look.
+@lru_cache(maxsize=128)
+def _obf_constant(fractions: tuple, alpha: float) -> float:
+    """Calibrate discrete two-sided Brownian crossing probability by quadrature.
 
-    The O'Brien-Fleming boundary uses information fraction t_k = k / K:
-        z_k = z_{alpha/2} / sqrt(t_k) = z_{alpha/2} * sqrt(K / k)
-        alpha_k = 2 * (1 - Phi(z_k))
-
-    Parameters
-    ----------
-    num_looks : int
-        Number of planned looks.
-    alpha : float, default 0.05
-        Target overall error rate.
-
-    Returns
-    -------
-    z_crits : list of float
-    alpha_per_look : list of float
+    W(t_k) has independent N(0, t_k-t_{k-1}) increments. Integrating its
+    surviving density inside [-c, c] at every look accounts for earlier exits.
     """
-    z_alpha = stats.norm.ppf(1.0 - (alpha / 2.0))
-    z_crits = []
-    alpha_per_look = []
+    times = np.asarray(fractions)
+    if len(times) == 1:
+        return float(stats.norm.isf(alpha / 2) * np.sqrt(times[0]))
 
-    for k in range(1, num_looks + 1):
-        t_k = k / num_looks
-        zk = z_alpha / np.sqrt(t_k)
-        ak = float(2.0 * stats.norm.sf(zk))
-        z_crits.append(float(zk))
-        alpha_per_look.append(ak)
+    def calibrate(order):
+        nodes, weights = np.polynomial.legendre.leggauss(order)
 
-    return z_crits, alpha_per_look
+        def crossing_probability(c):
+            # Truncate only negligible Gaussian tails to resolve early looks.
+            radii = np.minimum(c, 9 * np.sqrt(times))
+            previous_x = nodes * radii[0]
+            previous_w = weights * radii[0]
+            density = stats.norm.pdf(previous_x, scale=np.sqrt(times[0]))
+            for index in range(1, len(times)):
+                x = nodes * radii[index]
+                transition = stats.norm.pdf(
+                    x[:, None] - previous_x[None, :],
+                    scale=np.sqrt(times[index] - times[index - 1]))
+                density = transition @ (density * previous_w)
+                previous_x, previous_w = x, weights * radii[index]
+            return 1 - float(density @ previous_w)
+
+        lower = stats.norm.isf(alpha / 2) * np.sqrt(times[-1])
+        upper = stats.norm.isf(alpha / (2 * len(times))) * np.sqrt(times[-1])
+        return float(optimize.brentq(lambda c: crossing_probability(c) - alpha,
+                                     lower, upper, xtol=1e-10))
+
+    previous = calibrate(128)
+    for order in (256, 512):
+        current = calibrate(order)
+        if abs(current - previous) < 1e-7:
+            return current
+        previous = current
+    raise ValueError("Information schedule is too uneven for reliable boundary calibration.")
+
+
+def get_obrien_fleming_boundaries(
+    num_looks: int, alpha: float = 0.05,
+    information_fractions=None,
+) -> Tuple[List[float], List[float]]:
+    """Discrete O'Brien-Fleming boundaries z_k = c / sqrt(t_k).
+
+    Numerically calibrates c to overall two-sided alpha under the canonical
+    joint-normal model. Defaults to equally spaced information, ending at 1.
+    Irregular looks may supply their actual increasing information fractions.
+    """
+    if not isinstance(num_looks, (int, np.integer)) or not 1 <= num_looks <= 100:
+        raise ValueError("Number of looks must be an integer between 1 and 100.")
+    if not 0 < alpha < 1:
+        raise ValueError("Alpha must be between 0 and 1.")
+    times = (np.arange(1, num_looks + 1) / num_looks if information_fractions is None
+             else np.asarray(information_fractions, dtype=float))
+    if (times.shape != (num_looks,) or not np.isfinite(times).all()
+            or times[0] <= 0 or times[-1] > 1 or np.any(np.diff(times) <= 0)):
+        raise ValueError("Information fractions must be finite, increasing, and in (0, 1].")
+    constant = _obf_constant(tuple(times), float(alpha))
+    z_crits = constant / np.sqrt(times)
+    thresholds = 2 * stats.norm.sf(z_crits)
+    return z_crits.tolist(), thresholds.tolist()
 
 
 def evaluate_pocock_correction(
@@ -196,10 +232,16 @@ def evaluate_obrien_fleming_correction(
     if look_days is None:
         look_days = list(range(1, peeking_res.num_days + 1))
 
+    if (not look_days or any(not isinstance(d, (int, np.integer)) for d in look_days)
+            or any(d < 1 or d > peeking_res.num_days for d in look_days)
+            or any(a >= b for a, b in zip(look_days, look_days[1:]))):
+        raise ValueError("Look days must be strictly increasing valid simulation days.")
     num_looks = len(look_days)
     day_indices = [d - 1 for d in look_days]
 
-    z_crits, thresholds = get_obrien_fleming_boundaries(num_looks, alpha=peeking_res.alpha)
+    z_crits, thresholds = get_obrien_fleming_boundaries(
+        num_looks, alpha=peeking_res.alpha,
+        information_fractions=np.asarray(look_days) / peeking_res.num_days)
     thresh_arr = np.array(thresholds)[np.newaxis, :]  # shape: (1, num_looks)
 
     # Slice p-values at look days
@@ -214,7 +256,7 @@ def evaluate_obrien_fleming_correction(
     corrected_fpr = float(np.mean(corrected_ever_sig))
 
     verdict = (
-        f"SUCCESS: O'Brien-Fleming alpha spending reduced the false positive rate "
+        f"Calibrated discrete O'Brien-Fleming boundaries changed the false positive rate "
         f"from {naive_fpr:.2%} down to {corrected_fpr:.2%}. It remains extremely "
         f"conservative early on (Day 1 alpha = {thresholds[0]:.2e}) and preserves "
         f"high final-stage power (Day {look_days[-1]} alpha = {thresholds[-1]:.4f})."
